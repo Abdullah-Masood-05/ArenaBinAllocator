@@ -133,33 +133,3 @@ void merge_free_blocks()
         }
     }
 }
-
-int main()
-{
-    if (initialize_arena(16 * PAGE_SIZE) == -1)
-    {
-        printf("Failed to initialize memory arena.\n");
-        return 1;
-    }
-
-    void *ptr1 = custom_malloc(50);
-    void *ptr2 = custom_malloc(100);
-    void *ptr3 = custom_malloc(50);
-
-    printf("Allocated ptr1, ptr2, ptr3\n");
-
-    custom_free(ptr2);
-    printf("Freed ptr2\n");
-
-    void *ptr4 = custom_malloc(150);
-    printf("Allocated ptr4\n");
-
-    custom_free(ptr1);
-    custom_free(ptr3);
-    custom_free(ptr4);
-    printf("Freed ptr1, ptr3, ptr4\n");
-
-    merge_free_blocks();
-
-    return 0;
-}
