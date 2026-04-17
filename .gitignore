@@ -1,3 +1,20 @@
-/.vscode
-/build
+# ── Build output ──────────────────────────────────────────────────────
+allocator
+*.o
+
+# ── Editor / IDE artefacts ────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*~
+
+# ── Compiled / generated files ────────────────────────────────────────
+build/
+a.out
+
+# ── Debug / sanitiser output ──────────────────────────────────────────
+*.dSYM/
+core
+
+# ── Scratch / personal files ──────────────────────────────────────────
 new.c

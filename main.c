@@ -1,200 +1,142 @@
 /*
- * ArenaBinAllocator - A custom memory allocator using arena and bin-based strategy
- * 
- * This implementation provides malloc/free/realloc functionality with:
- * - Bin-based allocation for small chunks
- * - Arena-based management for large allocations
- * - Free block merging to reduce fragmentation
+ * main.c - ArenaBinAllocator usage demonstration
+ *
+ * Exercises custom_malloc / custom_free / custom_realloc / merge_free_blocks
+ * with basic assertions to verify correct behaviour.
+ *
+ * Build:  make          (see Makefile)
+ * Run:    ./allocator
  */
 
+#include "allocator.h"
+
+#include <assert.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
-#define BIN_COUNT 10
-#define BIN_SIZE 32
-#define PAGE_SIZE 4096
+/* ── Helpers ──────────────────────────────────────────────────────────── */
 
-typedef struct Chunk
+static void print_banner(const char *label)
 {
-    size_t size;
-    struct Chunk *next;
-} Chunk;
-
-typedef struct
-{
-    Chunk *bins[BIN_COUNT];
-    void *arena_start;
-    size_t arena_size;
-    size_t arena_offset;
-} Allocator;
-
-static Allocator allocator = {{NULL}, NULL, 0, 0};
-
-/**
- * request_new_pages - Request a new page-aligned memory block from the system
- * @size: Requested size in bytes
- * 
- * Returns: Pointer to allocated memory or NULL on failure
- */
-void *request_new_pages(size_t size)
-{
-    size = (size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
-    void *ptr = sbrk(size);
-    if (ptr == (void *)-1)
-        return NULL;
-    return ptr;
+    printf("\n── %s ──\n", label);
 }
 
-/**
- * initialize_arena - Initialize the memory arena
- * @arena_size: Size of the arena to allocate
- * 
- * Returns: 0 on success, -1 on failure
- */
-int initialize_arena(size_t arena_size)
+/* ── Test cases ───────────────────────────────────────────────────────── */
+
+static void test_basic_alloc_free(void)
 {
-    if (arena_size == 0)
-        return -1;
-/**
- * custom_malloc - Allocate memory using bins for small sizes
- * @size: Size of memory to allocate
- * 
- * Returns: Pointer to allocated memory or NULL on failure
- * 
- * Uses bin-based allocation for chunks <= BIN_COUNT * BIN_SIZE,
- * otherwise uses arena with dynamic page allocation
- */
-void *custom_malloc(size_t size)
+    print_banner("Basic alloc / free");
+
+    void *p1 = custom_malloc(50);
+    void *p2 = custom_malloc(100);
+    void *p3 = custom_malloc(50);
+
+    assert(p1 && "custom_malloc(50) returned NULL");
+    assert(p2 && "custom_malloc(100) returned NULL");
+    assert(p3 && "custom_malloc(50) returned NULL");
+
+    printf("  p1=%p  p2=%p  p3=%p\n", p1, p2, p3);
+
+    custom_free(p2);
+    custom_free(p1);
+    custom_free(p3);
+
+    printf("  All freed successfully.\n");
+}
+
+static void test_realloc(void)
 {
-    if (size == 0)
-        return NULL;
-    
-    if (!allocator.arena_start)
-        return NULL;
-    
-    size_t bin_index = size / BIN_SIZE;
-    
-    allocator.arena_size = arena_size;
-    allocator.arena_offset = 0;
+    print_banner("Realloc");
+
+    void *p = custom_malloc(32);
+    assert(p && "initial custom_malloc failed");
+
+    /* Write a known pattern before reallocating. */
+    memset(p, 0xAB, 32);
+
+    void *p2 = custom_realloc(p, 128);
+    assert(p2 && "custom_realloc failed");
+
+    /* The first 32 bytes must be preserved. */
+    unsigned char *bytes = (unsigned char *)p2;
+    for (int i = 0; i < 32; i++)
+        assert(bytes[i] == 0xAB && "data corrupted by realloc");
+
+    printf("  Data integrity verified after realloc(32 -> 128).\n");
+
+    custom_free(p2);
+}
+
+static void test_bin_recycling(void)
+{
+    print_banner("Bin recycling");
+
+    void *a = custom_malloc(16);
+    assert(a);
+    custom_free(a);
+
+    /* A fresh allocation of the same size class should reuse the bin slot. */
+    void *b = custom_malloc(16);
+    assert(b);
+    printf("  a=%p  b=%p  (same address = bin reused: %s)\n",
+           a, b, a == b ? "yes" : "no – new arena slot");
+
+    custom_free(b);
+}
+
+static void test_merge_free_blocks(void)
+{
+    print_banner("Merge free blocks");
+
+    void *p1 = custom_malloc(32);
+    void *p2 = custom_malloc(32);
+    assert(p1 && p2);
+
+    custom_free(p1);
+    custom_free(p2);
+    merge_free_blocks();
+
+    printf("  merge_free_blocks() completed without error.\n");
+}
+
+static void test_null_and_edge_cases(void)
+{
+    print_banner("NULL / edge-case safety");
+
+    /* malloc(0) must return NULL without crashing. */
+    void *p = custom_malloc(0);
+    assert(p == NULL && "custom_malloc(0) should return NULL");
+
+    /* free(NULL) must be a no-op. */
+    custom_free(NULL);
+
+    /* realloc(NULL, n) must behave like malloc(n). */
+    void *q = custom_realloc(NULL, 64);
+    assert(q && "custom_realloc(NULL, 64) failed");
+    custom_free(q);
+
+    printf("  All edge cases passed.\n");
+}
+
+/* ── Entry point ──────────────────────────────────────────────────────── */
+
+int main(void)
+{
+    printf("ArenaBinAllocator – demonstration\n");
+    printf("==================================\n");
+
+    if (initialize_arena(16 * PAGE_SIZE) != 0)
+    {
+        fprintf(stderr, "Failed to initialize memory arena.\n");
+        return 1;
+    }
+
+    test_basic_alloc_free();
+    test_bin_recycling();
+    test_realloc();
+    test_merge_free_blocks();
+    test_null_and_edge_cases();
+
+    printf("\nAll tests passed.\n");
     return 0;
-}
-
-void *custom_malloc(int size)
-{
-    if (size == 0)
-        return NULL;
-    int bin_index = size / BIN_SIZE;
-    if (bin_index >= BIN_COUNT)
-    {
-        if (allocator.arena_offset + sizeof(Chunk) + size > allocator.arena_size)
-        {
-            void *new_pages = request_new_pages(PAGE_SIZE);
-            if (!new_pages)
-                return NULL;
-            allocator.arena_start = new_pages;
-            allocator.arena_offset = sizeof(Chunk);
-        }
-        Chunk *chunk = (Chunk *)(allocator.arena_start + allocator.arena_offset);
-        chunk->size = size;
-        allocator.arena_offset += sizeof(Chunk) + size;
-        return (void *)(chunk + 1);
-    }
-
-    if (allocator.bins[bin_index] != NULL)
-    {
-        Chunk *chunk = allocator.bins[bin_index];
-        allocator.bins[bin_index] = chunk->next;
-        return (void *)(chunk + 1);
-    }
-
-/**
- * custom_free - Deallocate memory and return to bin for reuse
- * @ptr: Pointer to memory to deallocate
- * 
- * Returns: void
- * 
- * Only bins managed chunks; large allocations are not freed
- */
-void custom_free(void *ptr)
-{
-    if (!ptr)
-        return;
-
-/**
- * custom_realloc - Resize allocated memory block
- * @ptr: Pointer to existing allocation (or NULL)
- * @size: New size in bytes
- * 
- * Returns: Pointer to resized memory or NULL on failure
- * 
- * If size is smaller than current, returns the same pointer.
- * If larger, allocates new block and copies data.
- */
-void *custom_realloc(void *ptr, size_t size)
-{
-    if (ptr == NULL)
-        return custom_malloc(size);
-
-    Chunk *chunk = (Chunk *)ptr - 1;
-    size_locator.arena_offset += sizeof(Chunk) + size;
-    return (void *)(chunk + 1);
-}
-/**
- * merge_free_blocks - Merge adjacent free blocks to reduce fragmentation
- * 
- * Returns: void
- * 
- * Iterates through all bins and merges contiguous free chunks
- */
-void merge_free_blocks(void)
-{
-    for (size_t i = 0; i < BIN_COUNT; i++)
-    {
-        Chunk *current = allocator.bins[i];
-        while (current != NULL && current->next != NULL)
-        {
-            if ((char *)current + sizeof(Chunk) + current->size == (char *)current->next)
-            {
-                current->size += sizeof(Chunk) +
-    chunk->next = allocator.bins[bin_index];
-    allocator.bins[bin_index] = chunk;
-}
-
-void *custom_realloc(void *ptr, int size)
-{
-    if (ptr == NULL)
-        return custom_malloc(size);
-
-    Chunk *chunk = (Chunk *)ptr - 1;
-    int old_size = chunk->size;
-    if (old_size >= size)
-        return ptr;
-
-    void *new_ptr = custom_malloc(size);
-    if (new_ptr)
-    {
-        memcpy(new_ptr, ptr, old_size);
-        custom_free(ptr);
-    }
-    return new_ptr;
-}
-
-void merge_free_blocks()
-{
-    for (int i = 0; i < BIN_COUNT; i++)
-    {
-        Chunk *current = allocator.bins[i];
-        while (current != NULL && current->next != NULL)
-        {
-            if ((char *)current + current->size == (char *)current->next)
-            {
-                current->size += current->next->size;
-                current->next = current->next->next;
-            }
-            else
-                current = current->next;
-        }
-    }
 }
