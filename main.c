@@ -8,6 +8,13 @@
  * Run:    ./allocator
  */
 
+/* windows.h must come before allocator.h: winioctl.h declares a BIN_COUNT
+ * type that our BIN_COUNT macro would otherwise clobber. */
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h> /* SetConsoleOutputCP */
+#endif
+
 #include "allocator.h"
 
 #include <assert.h>
@@ -122,6 +129,12 @@ static void test_null_and_edge_cases(void)
 
 int main(void)
 {
+#ifdef _WIN32
+    /* The source (and thus all string literals) is UTF-8; make the console
+     * decode it as such instead of the legacy OEM code page. */
+    SetConsoleOutputCP(CP_UTF8);
+#endif
+
     printf("ArenaBinAllocator – demonstration\n");
     printf("==================================\n");
 

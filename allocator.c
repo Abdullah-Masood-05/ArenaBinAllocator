@@ -6,24 +6,29 @@
  *
  *   - Small allocations (<= BIN_COUNT * BIN_SIZE bytes) are served from
  *     per-size-class free-lists (bins) to enable O(1) recycling.
- *   - Large allocations are carved linearly from an mmap'd arena region
- *     that grows on demand via sbrk(2).
+ *   - Large allocations are carved linearly from an arena region that
+ *     grows on demand (sbrk(2) on POSIX, VirtualAlloc on Windows).
  *   - merge_free_blocks() coalesces physically adjacent free chunks to
  *     reduce fragmentation over time.
- *
- * NOTE: sbrk(2) is a Linux/POSIX interface.  This file is intentionally
- * Linux-only and will not compile on Windows without a compatibility shim.
  */
 
 /* Expose POSIX/GNU extensions (sbrk, intptr_t, etc.) under -std=c11.
  * Must appear before any #include. */
 #define _GNU_SOURCE
 
+/* windows.h must come before allocator.h: winioctl.h declares a BIN_COUNT
+ * type that our BIN_COUNT macro would otherwise clobber. */
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h> /* VirtualAlloc      */
+#else
+#include <unistd.h>  /* sbrk              */
+#endif
+
 #include "allocator.h"
 
 #include <stdio.h>   /* fprintf, stderr   */
 #include <string.h>  /* memcpy            */
-#include <unistd.h>  /* sbrk              */
 
 /* ── Module-private state ─────────────────────────────────────────────── */
 
@@ -32,11 +37,12 @@ static Allocator allocator = { { NULL }, NULL, 0, 0 };
 /* ── Internal helpers ─────────────────────────────────────────────────── */
 
 /**
- * request_new_pages - Extend the heap by at least @size bytes via sbrk(2).
+ * request_new_pages - Extend the heap by at least @size bytes.
  * @size: Minimum number of bytes required.
  *
- * The request is rounded up to the nearest PAGE_SIZE boundary so that the
- * heap pointer always stays page-aligned.
+ * Uses sbrk(2) on POSIX systems and VirtualAlloc on Windows.  The request
+ * is rounded up to the nearest PAGE_SIZE boundary so that the heap pointer
+ * always stays page-aligned.
  *
  * Returns a pointer to the newly allocated region, or NULL on failure.
  */
@@ -45,13 +51,23 @@ static void *request_new_pages(size_t size)
     /* Round up to the next page boundary. */
     size = (size + PAGE_SIZE - 1) & ~((size_t)(PAGE_SIZE - 1));
 
-    void *ptr = sbrk((intptr_t)size);
-    if (ptr == (void *)-1)
+#ifdef _WIN32
+    void *ptr = VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (ptr == NULL)
     {
-        fprintf(stderr, "allocator: sbrk failed – out of memory\n");
+        fprintf(stderr, "allocator: VirtualAlloc failed - out of memory\n");
         return NULL;
     }
     return ptr;
+#else
+    void *ptr = sbrk((intptr_t)size);
+    if (ptr == (void *)-1)
+    {
+        fprintf(stderr, "allocator: sbrk failed - out of memory\n");
+        return NULL;
+    }
+    return ptr;
+#endif
 }
 
 /**
