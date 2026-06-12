@@ -3,10 +3,10 @@
 A custom memory allocator written in C that implements `malloc`, `free`, and `realloc` semantics using a **hybrid arena + bin strategy**:
 
 - **Bin-based recycling** for small allocations (≤ 320 bytes) — O(1) free-list per size class.
-- **Arena bump-pointer** for large allocations — linear carving from a contiguous region grown via `sbrk(2)`.
+- **Arena bump-pointer** for large allocations — linear carving from a contiguous region grown on demand.
 - **Free-block coalescing** to reduce fragmentation over time.
 
-> **Platform:** Linux / POSIX only (`sbrk` is used for heap management).
+> **Platform:** Linux / POSIX and Windows. Heap growth uses `sbrk(2)` on POSIX systems and `VirtualAlloc` on Windows.
 
 ---
 
@@ -24,7 +24,7 @@ A custom memory allocator written in C that implements `malloc`, `free`, and `re
 ## How It Works
 
 ### 1. Arena Initialization
-`initialize_arena(size)` bootstraps the allocator by requesting a page-aligned memory region from the OS via `sbrk(2)`. All subsequent allocations are served from this region until it is exhausted, at which point a new page-aligned region is requested automatically.
+`initialize_arena(size)` bootstraps the allocator by requesting a page-aligned memory region from the OS (`sbrk(2)` on POSIX, `VirtualAlloc` on Windows). All subsequent allocations are served from this region until it is exhausted, at which point a new page-aligned region is requested automatically.
 
 ### 2. Bin-Based Small Allocations
 Allocations up to `BIN_COUNT × BIN_SIZE` bytes (10 × 32 = **320 bytes**) are routed to one of 10 size-class free-lists. When a chunk is freed, it is prepended to its bin's list and reused immediately by the next matching allocation — this avoids touching the arena again.
@@ -49,7 +49,7 @@ Requests above 320 bytes are carved directly from the arena. A `Chunk` header is
 
 ## Build & Run
 
-Requires `gcc` and `make` on Linux.
+Requires `gcc` and `make` — on Linux natively, or on Windows via MinGW-w64 (e.g. MSYS2).
 
 ```bash
 # Clone
@@ -69,6 +69,9 @@ make debug
 # Clean build artefacts
 make clean
 ```
+
+> **Note:** `make debug` requires AddressSanitizer support, which MinGW gcc on
+> Windows generally lacks. Use WSL/Linux (or clang with ASan) for sanitized builds.
 
 ---
 
@@ -127,7 +130,8 @@ Coalesces adjacent free chunks within each bin to reduce fragmentation.
 
 ## Known Limitations
 
-- Large allocations are not reclaimed on `custom_free` — `sbrk` does not support arbitrary frees. A production implementation would use `mmap` / `munmap` instead.
+- Large allocations are not reclaimed on `custom_free` — `sbrk` does not support arbitrary frees. A production implementation would use `mmap` / `munmap` (or `VirtualFree` on Windows) instead.
+- When the arena is exhausted, the allocator abandons the remainder of the old region and switches to a fresh one; the leftover bytes are never reused.
 - The allocator is **not thread-safe**. Concurrent use requires external locking.
 - `initialize_arena` may only be called once per process lifetime in the current implementation.
 
